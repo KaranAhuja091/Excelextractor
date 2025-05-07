@@ -42,7 +42,7 @@ def extract_date(html):
     try:
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 1. Try meta tags
+        # 1. Check meta tags
         meta_tags = [
             {'property': 'article:published_time'},
             {'name': 'pubdate'},
@@ -56,7 +56,7 @@ def extract_date(html):
                 if parsed:
                     return parsed.date()
 
-        # 2. Try JSON-LD blocks
+        # 2. JSON-LD script tags
         json_lds = soup.find_all('script', type='application/ld+json')
         for tag in json_lds:
             try:
@@ -74,10 +74,29 @@ def extract_date(html):
                             parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'YMD'})
                             if parsed:
                                 return parsed.date()
-            except Exception:
+            except:
                 continue
 
-        # 3. Search script tags for patterns
+        # 3. <time> tag with datetime or text
+        time_tag = soup.find('time')
+        if time_tag and (time_tag.get('datetime') or time_tag.text):
+            date_str = time_tag.get('datetime') or time_tag.text
+            parsed = dateparser.parse(date_str.strip(), settings={'DATE_ORDER': 'YMD'})
+            if parsed:
+                return parsed.date()
+
+        # 4. Tags with class or ID like 'date', 'published', etc.
+        date_selectors = ['date', 'published', 'pubdate', 'post-date', 'article-date']
+        for cls in date_selectors:
+            date_element = soup.find(attrs={'class': re.compile(cls, re.I)})
+            if not date_element:
+                date_element = soup.find(attrs={'id': re.compile(cls, re.I)})
+            if date_element:
+                parsed = dateparser.parse(date_element.get_text(strip=True), settings={'DATE_ORDER': 'YMD'})
+                if parsed:
+                    return parsed.date()
+
+        # 5. Script tag search
         for script in soup.find_all('script'):
             if script.string:
                 found = re.findall(
@@ -88,7 +107,7 @@ def extract_date(html):
                     if parsed:
                         return parsed.date()
 
-        # 4. Regex fallback on visible text
+        # 6. Fallback regex on all visible text
         text = soup.get_text()
         match = re.findall(
             r'(\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b|\b(?:\d{1,2}[-\s]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-,\s.]*\d{2,4})\b)',
@@ -122,21 +141,19 @@ def process_dataframe(df):
     for headline, link in zip(headlines, links):
         html = fetch_html(link)
         article = extract_article_text(html)
-        compare_headline_to_article(headline, article)  # Optional use
+        compare_headline_to_article(headline, article)
         date = extract_date(html)
         label = classify_article(article)
         dates.append(date)
         labels.append(label)
 
-    # Add new columns to copy of df
     df_new = df.copy()
-    df_new.columns = range(df_new.shape[1])  # Temporarily index columns numerically
+    df_new.columns = range(df_new.shape[1])  # Number columns
 
-    # Add column headers to row 0
+    # Add headers in first row
     df_new.at[0, df_new.shape[1]] = 'Extracted Date'
     df_new.at[0, df_new.shape[1]] = 'Classification'
 
-    # Fill values row by row
     for i in range(1, len(df_new)):
         df_new.at[i, df_new.shape[1] - 2] = dates[i - 1]
         df_new.at[i, df_new.shape[1] - 1] = labels[i - 1]
