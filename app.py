@@ -7,17 +7,24 @@ from sklearn.metrics.pairwise import cosine_similarity
 import re
 import dateparser
 from io import BytesIO
+import json
 
 st.set_page_config(page_title="News Classifier", layout="centered")
 
 # -------------------- Helper Functions --------------------
 
-def extract_article_text(url):
+def fetch_html(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+        return response.text
+    except:
+        return ""
+
+def extract_article_text(html):
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
         paragraphs = soup.find_all('p')
         return ' '.join([p.get_text() for p in paragraphs]).strip()
     except:
@@ -31,9 +38,39 @@ def compare_headline_to_article(headline, article):
     except:
         return 0
 
-def extract_date(text):
+def extract_date(html):
     try:
-        date_match = re.findall(r'(\b(?:\d{1,2}[-/thstndrd\s.]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/\s,.]*\d{2,4})\b|\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b)', text, re.IGNORECASE)
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # Try meta tags
+        meta_date = soup.find('meta', {'property': 'article:published_time'}) \
+                    or soup.find('meta', {'name': 'pubdate'}) \
+                    or soup.find('meta', {'name': 'date'}) \
+                    or soup.find('meta', {'itemprop': 'datePublished'})
+        if meta_date and meta_date.get('content'):
+            parsed = dateparser.parse(meta_date['content'])
+            if parsed:
+                return parsed.date()
+
+        # Try JSON-LD
+        json_ld = soup.find('script', type='application/ld+json')
+        if json_ld:
+            try:
+                data = json.loads(json_ld.string)
+                if isinstance(data, dict):
+                    date_str = data.get('datePublished') or data.get('dateCreated')
+                    if date_str:
+                        parsed = dateparser.parse(date_str)
+                        if parsed:
+                            return parsed.date()
+            except Exception:
+                pass
+
+        # Fallback to regex in full text
+        text = soup.get_text()
+        date_match = re.findall(
+            r'(\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b|\b(?:\d{1,2}[-\s]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-,\s.]*\d{2,4})\b)',
+            text, re.IGNORECASE)
         if date_match:
             parsed = dateparser.parse(date_match[0])
             if parsed:
@@ -44,11 +81,11 @@ def extract_date(text):
 
 def classify_article(text):
     text = text.lower()
-    if 'india' in text and any(word in text for word in ['positive', 'success', 'support']):
+    if 'india' in text and any(word in text for word in ['positive', 'success', 'support', 'development']):
         return 'Pro-India'
-    elif 'china' in text and any(word in text for word in ['sanction', 'tariff', 'ban', 'conflict']):
+    elif 'china' in text and any(word in text for word in ['sanction', 'tariff', 'ban', 'conflict', 'tension']):
         return 'Anti-China'
-    elif 'pakistan' in text and any(word in text for word in ['polio', 'terror', 'crisis', 'restriction']):
+    elif 'pakistan' in text and any(word in text for word in ['polio', 'terror', 'crisis', 'restriction', 'attack']):
         return 'Anti-Pakistan'
     else:
         return 'Miscellaneous'
@@ -62,19 +99,17 @@ def process_dataframe(df):
     labels = []
 
     for headline, link in zip(headlines, links):
-        article = extract_article_text(link)
+        html = fetch_html(link)
+        article = extract_article_text(html)
         compare_headline_to_article(headline, article)  # Optional
-        date = extract_date(article)
+        date = extract_date(html)
         label = classify_article(article)
         dates.append(date)
         labels.append(label)
 
     # Expand DataFrame with new columns
     df_new = df.copy()
-    original_cols = list(df_new.columns)
-
-    # Temporarily use column numbers to avoid index mismatch
-    df_new.columns = range(df_new.shape[1])
+    df_new.columns = range(df_new.shape[1])  # Temporarily number columns
 
     # Add headers in first row
     df_new.at[0, df_new.shape[1]] = 'Date'
