@@ -1,4 +1,4 @@
-import os
+import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -6,6 +6,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 import dateparser
+from io import BytesIO
+
+st.set_page_config(page_title="News Classifier", layout="centered")
+
+# -------------------- Helper Functions --------------------
 
 def extract_article_text(url):
     try:
@@ -14,10 +19,8 @@ def extract_article_text(url):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         paragraphs = soup.find_all('p')
-        article_text = ' '.join([para.get_text() for para in paragraphs])
-        return article_text.strip()
-    except Exception as e:
-        print(f"Error fetching content from {url}: {e}")
+        return ' '.join([p.get_text() for p in paragraphs]).strip()
+    except:
         return ""
 
 def compare_headline_to_article(headline, article):
@@ -32,9 +35,9 @@ def extract_date(text):
     try:
         date_match = re.findall(r'(\b(?:\d{1,2}[-/thstndrd\s.]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/\s,.]*\d{2,4})\b|\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b)', text, re.IGNORECASE)
         if date_match:
-            parsed_date = dateparser.parse(date_match[0])
-            if parsed_date:
-                return parsed_date.date()
+            parsed = dateparser.parse(date_match[0])
+            if parsed:
+                return parsed.date()
     except:
         pass
     return None
@@ -50,8 +53,7 @@ def classify_article(text):
     else:
         return 'Miscellaneous'
 
-def process_excel(file_path):
-    df = pd.read_excel(file_path, header=None)
+def process_dataframe(df):
     headlines = df.iloc[1:, 1].reset_index(drop=True)
     links = df.iloc[1:, 2].reset_index(drop=True)
 
@@ -60,27 +62,51 @@ def process_excel(file_path):
 
     for headline, link in zip(headlines, links):
         article = extract_article_text(link)
-        similarity = compare_headline_to_article(headline, article)
+        compare_headline_to_article(headline, article)  # Optional similarity usage
         date = extract_date(article)
         label = classify_article(article)
-
         dates.append(date)
         labels.append(label)
 
-        print(f"Processed: {headline[:60]}... | Similarity: {similarity:.2f} | Date: {date} | Label: {label}")
-
-    # Add new columns
     df.iloc[0, 3] = 'Date'
     df.iloc[0, 4] = 'Classification'
     df.iloc[1:, 3] = dates
     df.iloc[1:, 4] = labels
+    return df
 
-    # Construct output path in same directory
-    output_path = os.path.join(os.path.dirname(file_path), "Updated_" + os.path.basename(file_path))
-    df.to_excel(output_path, index=False)
+def convert_df_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, header=False)
+    output.seek(0)
+    return output
 
-    print(f"\n✅ Updated file saved as: {output_path}")
+# -------------------- Streamlit Interface --------------------
 
-# === ✅ RUN HERE ===
-# Replace the path with your actual file if needed
-process_excel("Book1.xlsx")
+st.title("📰 News Headline Classifier")
+st.write("Upload an Excel file with headlines and URLs. The tool will fetch article content, compare it, extract date, and classify it as Pro-India, Anti-China, Anti-Pakistan, or Miscellaneous.")
+
+uploaded_file = st.file_uploader("📤 Upload Excel file", type=["xlsx"])
+
+if uploaded_file:
+    try:
+        df = pd.read_excel(uploaded_file, header=None)
+        st.success("✅ File uploaded successfully!")
+
+        with st.spinner("Processing articles..."):
+            updated_df = process_dataframe(df)
+            output_excel = convert_df_to_excel(updated_df)
+
+        st.success("✅ Processing complete!")
+        st.write("🔍 Preview of output:")
+        st.dataframe(updated_df.head(10), use_container_width=True)
+
+        st.download_button(
+            label="📥 Download Processed Excel",
+            data=output_excel,
+            file_name="Updated_Headlines.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
