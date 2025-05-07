@@ -54,6 +54,7 @@ def classify_article(text):
         return 'Miscellaneous'
 
 def process_dataframe(df):
+    # Extract existing data
     headlines = df.iloc[1:, 1].reset_index(drop=True)
     links = df.iloc[1:, 2].reset_index(drop=True)
 
@@ -62,17 +63,26 @@ def process_dataframe(df):
 
     for headline, link in zip(headlines, links):
         article = extract_article_text(link)
-        compare_headline_to_article(headline, article)  # Optional similarity usage
+        compare_headline_to_article(headline, article)
         date = extract_date(article)
         label = classify_article(article)
         dates.append(date)
         labels.append(label)
 
-    df.iloc[0, 3] = 'Date'
-    df.iloc[0, 4] = 'Classification'
-    df.iloc[1:, 3] = dates
-    df.iloc[1:, 4] = labels
-    return df
+    # Create a copy of original DataFrame
+    df_processed = df.copy()
+
+    # Add headers in row 0
+    df_processed.iloc[0, len(df.columns)] = 'Date'
+    df_processed.iloc[0, len(df.columns) + 1] = 'Classification'
+
+    # Append data from row 1 onward
+    for i in range(1, len(df_processed)):
+        df_processed.iat[i, len(df.columns)] = dates[i - 1]
+        df_processed.iat[i, len(df.columns) + 1] = labels[i - 1]
+
+    return df_processed
+
 
 def convert_df_to_excel(df):
     output = BytesIO()
