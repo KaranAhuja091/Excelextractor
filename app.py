@@ -6,8 +6,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 import dateparser
-from io import BytesIO
 import json
+from io import BytesIO
 
 st.set_page_config(page_title="News Classifier", layout="centered")
 
@@ -42,42 +42,54 @@ def extract_date(html):
     try:
         soup = BeautifulSoup(html, 'html.parser')
 
-        # Try meta tags
-        meta_date = soup.find('meta', {'property': 'article:published_time'}) \
-                    or soup.find('meta', {'name': 'pubdate'}) \
-                    or soup.find('meta', {'name': 'date'}) \
-                    or soup.find('meta', {'itemprop': 'datePublished'})
-        if meta_date and meta_date.get('content'):
-            parsed = dateparser.parse(meta_date['content'])
-            if parsed:
-                return parsed.date()
+        # 1. Try meta tags
+        meta_tags = [
+            {'property': 'article:published_time'},
+            {'name': 'pubdate'},
+            {'name': 'date'},
+            {'itemprop': 'datePublished'}
+        ]
+        for tag in meta_tags:
+            meta = soup.find('meta', tag)
+            if meta and meta.get('content'):
+                parsed = dateparser.parse(meta['content'])
+                if parsed:
+                    return parsed.date()
 
-        # Try JSON-LD
-        json_ld = soup.find('script', type='application/ld+json')
-        if json_ld:
+        # 2. Try JSON-LD
+        json_lds = soup.find_all('script', type='application/ld+json')
+        for tag in json_lds:
             try:
-                data = json.loads(json_ld.string)
+                data = json.loads(tag.string)
                 if isinstance(data, dict):
                     date_str = data.get('datePublished') or data.get('dateCreated')
                     if date_str:
                         parsed = dateparser.parse(date_str)
                         if parsed:
                             return parsed.date()
-            except Exception:
-                pass
+            except:
+                continue
 
-        # Fallback to regex in full text
+        # 3. Look inside script tags for known patterns
+        for script in soup.find_all('script'):
+            if script.string:
+                found = re.findall(r'(?i)(?:"datePublished"|\'datePublished\'|published_time)["\']?\s*[:=]\s*["\']([^"\']+)["\']', script.string)
+                if found:
+                    parsed = dateparser.parse(found[0])
+                    if parsed:
+                        return parsed.date()
+
+        # 4. Fallback: use regex on entire text
         text = soup.get_text()
-        date_match = re.findall(
+        match = re.findall(
             r'(\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b|\b(?:\d{1,2}[-\s]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-,\s.]*\d{2,4})\b)',
             text, re.IGNORECASE)
-        if date_match:
-            parsed = dateparser.parse(date_match[0])
+        if match:
+            parsed = dateparser.parse(match[0])
             if parsed:
                 return parsed.date()
     except:
-        pass
-    return None
+        return None
 
 def classify_article(text):
     text = text.lower()
@@ -91,7 +103,6 @@ def classify_article(text):
         return 'Miscellaneous'
 
 def process_dataframe(df):
-    # Assume headlines in col 1 and links in col 2
     headlines = df.iloc[1:, 1].reset_index(drop=True)
     links = df.iloc[1:, 2].reset_index(drop=True)
 
@@ -107,7 +118,6 @@ def process_dataframe(df):
         dates.append(date)
         labels.append(label)
 
-    # Expand DataFrame with new columns
     df_new = df.copy()
     df_new.columns = range(df_new.shape[1])  # Temporarily number columns
 
