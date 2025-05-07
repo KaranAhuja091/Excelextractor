@@ -56,7 +56,7 @@ def extract_date(html):
                 if parsed:
                     return parsed.date()
 
-        # 2. JSON-LD data
+        # 2. JSON-LD
         json_lds = soup.find_all('script', type='application/ld+json')
         for tag in json_lds:
             try:
@@ -77,7 +77,7 @@ def extract_date(html):
             except:
                 continue
 
-        # 3. <time> tags
+        # 3. <time> tag
         time_tag = soup.find('time')
         if time_tag:
             date_str = time_tag.get('datetime') or time_tag.get_text(strip=True)
@@ -86,7 +86,7 @@ def extract_date(html):
                 if parsed:
                     return parsed.date()
 
-        # 4. Common date classes or IDs
+        # 4. Common class/id based selectors
         selectors = ['date', 'published', 'pubdate', 'post-date', 'article-date']
         for sel in selectors:
             tag = soup.find(attrs={'class': re.compile(sel, re.I)})
@@ -97,7 +97,7 @@ def extract_date(html):
                 if parsed:
                     return parsed.date()
 
-        # 5. JavaScript-based publication date
+        # 5. JavaScript-embedded date
         for script in soup.find_all('script'):
             if script.string:
                 found = re.findall(
@@ -108,8 +108,8 @@ def extract_date(html):
                     if parsed:
                         return parsed.date()
 
-        # 6. Fallback for formats like "15 Dec 2024"
-        text = soup.get_text()
+        # 6. Fallback: Search text for date formats like "15 Dec 2024"
+        text = soup.get_text(separator=' ')
         match = re.search(r'\b\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s\d{4}\b',
                           text, re.IGNORECASE)
         if match:
@@ -170,7 +170,7 @@ def convert_df_to_excel(df):
 # -------------------- Streamlit Interface --------------------
 
 st.title("📰 News Headline Classifier")
-st.write("Upload an Excel file with headlines and URLs. This tool fetches the content, extracts the publication date, compares the headline, and classifies the article.")
+st.write("Upload an Excel file with headlines and URLs. This tool will fetch article content, extract the date, compare headline and classify as Pro-India, Anti-China, Anti-Pakistan, or Miscellaneous.")
 
 uploaded_file = st.file_uploader("📤 Upload Excel file", type=["xlsx"])
 
