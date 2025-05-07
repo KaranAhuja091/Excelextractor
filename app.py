@@ -42,7 +42,7 @@ def extract_date(html):
     try:
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 1. Check meta tags
+        # 1. Meta tags
         meta_tags = [
             {'property': 'article:published_time'},
             {'name': 'pubdate'},
@@ -52,11 +52,11 @@ def extract_date(html):
         for tag in meta_tags:
             meta = soup.find('meta', tag)
             if meta and meta.get('content'):
-                parsed = dateparser.parse(meta['content'], settings={'DATE_ORDER': 'YMD'})
+                parsed = dateparser.parse(meta['content'], settings={'DATE_ORDER': 'DMY'})
                 if parsed:
                     return parsed.date()
 
-        # 2. JSON-LD script tags
+        # 2. JSON-LD data
         json_lds = soup.find_all('script', type='application/ld+json')
         for tag in json_lds:
             try:
@@ -64,58 +64,59 @@ def extract_date(html):
                 if isinstance(data, dict):
                     date_str = data.get('datePublished') or data.get('dateCreated')
                     if date_str:
-                        parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'YMD'})
+                        parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'DMY'})
                         if parsed:
                             return parsed.date()
                 elif isinstance(data, list):
                     for item in data:
                         date_str = item.get('datePublished') or item.get('dateCreated')
                         if date_str:
-                            parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'YMD'})
+                            parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'DMY'})
                             if parsed:
                                 return parsed.date()
             except:
                 continue
 
-        # 3. <time> tag with datetime or text
+        # 3. <time> tags
         time_tag = soup.find('time')
-        if time_tag and (time_tag.get('datetime') or time_tag.text):
-            date_str = time_tag.get('datetime') or time_tag.text
-            parsed = dateparser.parse(date_str.strip(), settings={'DATE_ORDER': 'YMD'})
-            if parsed:
-                return parsed.date()
-
-        # 4. Tags with class or ID like 'date', 'published', etc.
-        date_selectors = ['date', 'published', 'pubdate', 'post-date', 'article-date']
-        for cls in date_selectors:
-            date_element = soup.find(attrs={'class': re.compile(cls, re.I)})
-            if not date_element:
-                date_element = soup.find(attrs={'id': re.compile(cls, re.I)})
-            if date_element:
-                parsed = dateparser.parse(date_element.get_text(strip=True), settings={'DATE_ORDER': 'YMD'})
+        if time_tag:
+            date_str = time_tag.get('datetime') or time_tag.get_text(strip=True)
+            if date_str:
+                parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'DMY'})
                 if parsed:
                     return parsed.date()
 
-        # 5. Script tag search
+        # 4. Common date classes or IDs
+        selectors = ['date', 'published', 'pubdate', 'post-date', 'article-date']
+        for sel in selectors:
+            tag = soup.find(attrs={'class': re.compile(sel, re.I)})
+            if not tag:
+                tag = soup.find(attrs={'id': re.compile(sel, re.I)})
+            if tag:
+                parsed = dateparser.parse(tag.get_text(strip=True), settings={'DATE_ORDER': 'DMY'})
+                if parsed:
+                    return parsed.date()
+
+        # 5. JavaScript-based publication date
         for script in soup.find_all('script'):
             if script.string:
                 found = re.findall(
                     r'(?i)(?:"datePublished"|\'datePublished\'|published_time)["\']?\s*[:=]\s*["\']([^"\']+)["\']',
                     script.string)
                 for f in found:
-                    parsed = dateparser.parse(f, settings={'DATE_ORDER': 'YMD'})
+                    parsed = dateparser.parse(f, settings={'DATE_ORDER': 'DMY'})
                     if parsed:
                         return parsed.date()
 
-        # 6. Fallback regex on all visible text
+        # 6. Fallback for formats like "15 Dec 2024"
         text = soup.get_text()
-        match = re.findall(
-            r'(\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b|\b(?:\d{1,2}[-\s]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-,\s.]*\d{2,4})\b)',
-            text, re.IGNORECASE)
-        for m in match:
-            parsed = dateparser.parse(m, settings={'DATE_ORDER': 'YMD'})
+        match = re.search(r'\b\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s\d{4}\b',
+                          text, re.IGNORECASE)
+        if match:
+            parsed = dateparser.parse(match.group(), settings={'DATE_ORDER': 'DMY'})
             if parsed:
                 return parsed.date()
+
     except Exception as e:
         print(f"Date parsing error: {e}")
     return None
@@ -148,9 +149,8 @@ def process_dataframe(df):
         labels.append(label)
 
     df_new = df.copy()
-    df_new.columns = range(df_new.shape[1])  # Number columns
+    df_new.columns = range(df_new.shape[1])
 
-    # Add headers in first row
     df_new.at[0, df_new.shape[1]] = 'Extracted Date'
     df_new.at[0, df_new.shape[1]] = 'Classification'
 
@@ -170,7 +170,7 @@ def convert_df_to_excel(df):
 # -------------------- Streamlit Interface --------------------
 
 st.title("📰 News Headline Classifier")
-st.write("Upload an Excel file with headlines and URLs. The tool will fetch article content, compare it, extract date, and classify it as Pro-India, Anti-China, Anti-Pakistan, or Miscellaneous.")
+st.write("Upload an Excel file with headlines and URLs. This tool fetches the content, extracts the publication date, compares the headline, and classifies the article.")
 
 uploaded_file = st.file_uploader("📤 Upload Excel file", type=["xlsx"])
 
