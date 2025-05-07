@@ -52,11 +52,11 @@ def extract_date(html):
         for tag in meta_tags:
             meta = soup.find('meta', tag)
             if meta and meta.get('content'):
-                parsed = dateparser.parse(meta['content'])
+                parsed = dateparser.parse(meta['content'], settings={'DATE_ORDER': 'YMD'})
                 if parsed:
                     return parsed.date()
 
-        # 2. Try JSON-LD
+        # 2. Try JSON-LD blocks
         json_lds = soup.find_all('script', type='application/ld+json')
         for tag in json_lds:
             try:
@@ -64,32 +64,42 @@ def extract_date(html):
                 if isinstance(data, dict):
                     date_str = data.get('datePublished') or data.get('dateCreated')
                     if date_str:
-                        parsed = dateparser.parse(date_str)
+                        parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'YMD'})
                         if parsed:
                             return parsed.date()
-            except:
+                elif isinstance(data, list):
+                    for item in data:
+                        date_str = item.get('datePublished') or item.get('dateCreated')
+                        if date_str:
+                            parsed = dateparser.parse(date_str, settings={'DATE_ORDER': 'YMD'})
+                            if parsed:
+                                return parsed.date()
+            except Exception:
                 continue
 
-        # 3. Look inside script tags for known patterns
+        # 3. Search script tags for patterns
         for script in soup.find_all('script'):
             if script.string:
-                found = re.findall(r'(?i)(?:"datePublished"|\'datePublished\'|published_time)["\']?\s*[:=]\s*["\']([^"\']+)["\']', script.string)
-                if found:
-                    parsed = dateparser.parse(found[0])
+                found = re.findall(
+                    r'(?i)(?:"datePublished"|\'datePublished\'|published_time)["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                    script.string)
+                for f in found:
+                    parsed = dateparser.parse(f, settings={'DATE_ORDER': 'YMD'})
                     if parsed:
                         return parsed.date()
 
-        # 4. Fallback: use regex on entire text
+        # 4. Regex fallback on visible text
         text = soup.get_text()
         match = re.findall(
             r'(\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b|\b(?:\d{1,2}[-\s]*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-,\s.]*\d{2,4})\b)',
             text, re.IGNORECASE)
-        if match:
-            parsed = dateparser.parse(match[0])
+        for m in match:
+            parsed = dateparser.parse(m, settings={'DATE_ORDER': 'YMD'})
             if parsed:
                 return parsed.date()
-    except:
-        return None
+    except Exception as e:
+        print(f"Date parsing error: {e}")
+    return None
 
 def classify_article(text):
     text = text.lower()
@@ -112,20 +122,21 @@ def process_dataframe(df):
     for headline, link in zip(headlines, links):
         html = fetch_html(link)
         article = extract_article_text(html)
-        compare_headline_to_article(headline, article)  # Optional
+        compare_headline_to_article(headline, article)  # Optional use
         date = extract_date(html)
         label = classify_article(article)
         dates.append(date)
         labels.append(label)
 
+    # Add new columns to copy of df
     df_new = df.copy()
-    df_new.columns = range(df_new.shape[1])  # Temporarily number columns
+    df_new.columns = range(df_new.shape[1])  # Temporarily index columns numerically
 
-    # Add headers in first row
-    df_new.at[0, df_new.shape[1]] = 'Date'
+    # Add column headers to row 0
+    df_new.at[0, df_new.shape[1]] = 'Extracted Date'
     df_new.at[0, df_new.shape[1]] = 'Classification'
 
-    # Add values from second row onward
+    # Fill values row by row
     for i in range(1, len(df_new)):
         df_new.at[i, df_new.shape[1] - 2] = dates[i - 1]
         df_new.at[i, df_new.shape[1] - 1] = labels[i - 1]
