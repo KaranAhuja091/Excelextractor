@@ -144,6 +144,10 @@ def process_dataframe(df):
         article = extract_article_text(html)
         compare_headline_to_article(headline, article)
         date = extract_date(html)
+        if date:
+            date = date.strftime("%d/%m/%Y")  # Format to DD/MM/YYYY
+        else:
+            date = ""
         label = classify_article(article)
         dates.append(date)
         labels.append(label)
@@ -159,6 +163,7 @@ def process_dataframe(df):
         df_new.at[i, df_new.shape[1] - 1] = labels[i - 1]
 
     return df_new
+
 
 def convert_df_to_excel(df):
     output = BytesIO()
